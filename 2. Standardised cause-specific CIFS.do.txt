@@ -1,6 +1,6 @@
 /*Standardised survival curves - differences in risk of diabetes (incl death as a competing risk) by TBI
 
-AIM: compare the risk of diabetes in CYAC population who recieved TBI vs those who didn't using regression standardisation. 
+AIM: compare the risk of diabetes in CYAC population who recieved treatment of interest vs those who didn't using regression standardisation. 
 
 Estimating survival curves that are standardised to a common distribution of confounders makes it possible to compare the survival curves between those who recieved tbi vs those who didn't
 - If model is appropriate for confounder control then the difference between the standardised curves can be interpreted as the population causal effect. Comparable curves as average over the exact same distribution of confounders.
@@ -15,13 +15,13 @@ clear all
 adopath + "R:\Stata\ado\plus\"
 mata mata mlib index
 
-use "N:\CANREG\Kirsten\PhD\Data\LTHT cardiometabolic\Diabetes paper\Mi_censored_Nov24_aRTonly.dta", clear
+use "", clear
 
 rename corticosteroids corti
 tab diabetes_death_ind
 
 /*
-cd "N:\CANREG\Kirsten\PhD\May 2024\Kaplan Meier"
+cd ""
 
 log using Kaplan_Meier_estimates.log, replace
 
@@ -65,40 +65,6 @@ graphlog using Kaplan_Meier_estimates.log
 */
 ***************************************************************************************************************
 /// ----- 1.) Standardised Cumulative Incidence Functions - COMPETING RISKS (and also testing calibration)
-
-gen allogeneic2=1 if allogeneic==1
-replace allogeneic2=0 if allogeneic!=1
-
-gen autologous2=1 if autologous==1
-replace autologous2=0 if autologous!=1
-
-replace allogeneic2=1 if (transplant_type==9 & iccc12==1) 
-replace autologous2=1 if (transplant_type==9 & iccc12!=1)
-
-replace transplant_type=0 if autologous2==1
-replace transplant_type=1 if allogeneic2==1
-tab transplant_type
-tab transplant_type conditioning
-
-tab transplant_type 
-tab hba1c_hes_dms transplant_type, m col
-
-*Who has Hba1C (reviewers comment)
-dtable agediag i.agegrp i.diagperiod i.sex i.HES_ethgrp i.townsend_quin i.diaggrp i.tbi i.transplant i.transplant_type i.cranialrt i.abdomrt i.corti, by(hba1cmeasured) ///
-sample(, statistic(frequency percent) place(seplabels)) define(myiqr = p25 p75, delimiter("-")) continuous(agediag townsend_score, statistic(median myiqr)) nformat(%6.0f p25 p75 median) sformat("%s" myiqr) export(HbA1c_vs_not.docx, replace) 
-
-preserve
-keep if transplant_type!=.
-count 
-codebook PatientId
-bysort transplant_type: sum ageattransplant, d
-sum ageattransplant, d
-
-dtable i.hba1c_hes_dms i.diaggrp i.totaltransplants i.typeofcells i.donorsource i.tbi i.conditioning i.rt_treat, by(transplant_type) ///
-sample(, statistic(frequency percent) place(seplabels)) define(myiqr = p25 p75, delimiter("-")) continuous(ageattransplant, statistic(median myiqr)) ///
-nformat(%6.0f p25 p75 median) sformat("%s" myiqr) ///
-export(transplant_ptlevel.docx, replace)
-restore 
 
 cd "N:\CANREG\Kirsten\PhD\May 2024\CIFS\Paeds only"
 
