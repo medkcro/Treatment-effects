@@ -1,0 +1,901 @@
+/*Standardised survival curves - differences in risk of diabetes (incl death as a competing risk) by TBI
+
+AIM: compare the risk of diabetes in CYAC population who recieved TBI vs those who didn't using regression standardisation. 
+
+Estimating survival curves that are standardised to a common distribution of confounders makes it possible to compare the survival curves between those who recieved tbi vs those who didn't
+- If model is appropriate for confounder control then the difference between the standardised curves can be interpreted as the population causal effect. Comparable curves as average over the exact same distribution of confounders.
+- Key assumption is that the distribution of confounders is the same for the exposed vs unexposed
+- Aim is estimate the magnitude of treatment-related differences in risk of diabetes and the extent to which observed differences can be explained by measured covariates
+
+Will study changes in estimated hazard ratios and contrasting standardised survival curves*/ 
+log close
+/*1.) DATA PREPARATION AND MI */
+set more off 
+clear all
+adopath + "R:\Stata\ado\plus\"
+mata mata mlib index
+
+use "N:\CANREG\Kirsten\PhD\Data\LTHT cardiometabolic\Diabetes paper\Mi_censored_Nov24_aRTonly.dta", clear
+
+rename corticosteroids corti
+tab diabetes_death_ind
+
+/*
+cd "N:\CANREG\Kirsten\PhD\May 2024\Kaplan Meier"
+
+log using Kaplan_Meier_estimates.log, replace
+
+***********************************************************************************************************
+///------- SURVIVAL PROBABILITIES -------
+
+*KAPLAN MEIER ESTIMATION 
+foreach x in headfaceneck cranialrt tbi abdomrt transplant corti {
+
+// Exploring survival differences between treatment groups with Kaplan Meier estimator 
+tab diabetes_death_ind, m 
+stset surv_diabetesdeath, failure(diabetes_death_ind==1) id(PatientId) 
+
+//Obtain Kaplan Meier estimates by treatment arm for diabetes
+	sts list, risktable(10 15 20 25 30 35) by(`x')
+	
+	//Plot Kaplan Meier estimates
+	sts graph, by(`x') ///
+	title("") ytitle("Survival probability") ///
+	xtitle("Time from diagnosis") ///
+	legend(order(1 "`x'" 2 "Did not recieve `x'") rows(2)) ///
+	saving(kaplanmeier_`x'.gph, replace) 
+	graph export kaplanmeier_`x'.pdf, replace
+
+//Obtain Kaplan Meier estimates by treatment arm for death
+stset surv_diabetesdeath, failure(diabetes_death_ind==2) id(PatientId) 
+
+	sts list, risktable(10 15 20 25 30 35) by(`x')
+	
+	//Plot Kaplan Meier estimates
+	sts graph, by(`x') ///
+	title("") ytitle("Survival probability") ///
+	xtitle("Time from diagnosis") ///
+	legend(order(1 "`x'" 2 "Did not recieve `x'") rows(2)) ///
+	saving(kaplanmeier_`x'_d.gph, replace) 
+	graph export kaplanmeier_`x'_d.pdf, replace
+}
+
+log close 
+graphlog using Kaplan_Meier_estimates.log
+*/
+***************************************************************************************************************
+/// ----- 1.) Standardised Cumulative Incidence Functions - COMPETING RISKS (and also testing calibration)
+
+gen allogeneic2=1 if allogeneic==1
+replace allogeneic2=0 if allogeneic!=1
+
+gen autologous2=1 if autologous==1
+replace autologous2=0 if autologous!=1
+
+replace allogeneic2=1 if (transplant_type==9 & iccc12==1) 
+replace autologous2=1 if (transplant_type==9 & iccc12!=1)
+
+replace transplant_type=0 if autologous2==1
+replace transplant_type=1 if allogeneic2==1
+tab transplant_type
+tab transplant_type conditioning
+
+tab transplant_type 
+tab hba1c_hes_dms transplant_type, m col
+
+*Who has Hba1C (reviewers comment)
+dtable agediag i.agegrp i.diagperiod i.sex i.HES_ethgrp i.townsend_quin i.diaggrp i.tbi i.transplant i.transplant_type i.cranialrt i.abdomrt i.corti, by(hba1cmeasured) ///
+sample(, statistic(frequency percent) place(seplabels)) define(myiqr = p25 p75, delimiter("-")) continuous(agediag townsend_score, statistic(median myiqr)) nformat(%6.0f p25 p75 median) sformat("%s" myiqr) export(HbA1c_vs_not.docx, replace) 
+
+preserve
+keep if transplant_type!=.
+count 
+codebook PatientId
+bysort transplant_type: sum ageattransplant, d
+sum ageattransplant, d
+
+dtable i.hba1c_hes_dms i.diaggrp i.totaltransplants i.typeofcells i.donorsource i.tbi i.conditioning i.rt_treat, by(transplant_type) ///
+sample(, statistic(frequency percent) place(seplabels)) define(myiqr = p25 p75, delimiter("-")) continuous(ageattransplant, statistic(median myiqr)) ///
+nformat(%6.0f p25 p75 median) sformat("%s" myiqr) ///
+export(transplant_ptlevel.docx, replace)
+restore 
+
+cd "N:\CANREG\Kirsten\PhD\May 2024\CIFS\Paeds only"
+
+label variable cranialrt "cranial irradiation"
+label variable tbi "total body irradiation"
+label variable abdomrt "abdominal irradiation"
+label variable transplant "BM/PBSC transplant"
+label variable allogeneic2 "allogeneic PBSCT"
+label variable autologous2 "autologous transplant"
+label variable corti "corticosteroids"
+
+/*Splitting into 0-14 and 15-29 years as per reviewers comments
+preserve
+keep if agegrp2==1
+
+
+*Table 2. Summary table by diabetes status (incl death)
+dtable i.diagperiod agediag i.agegrp i.sex i.ethnic3 i.townsend_quin i.diaggrp i.relapse i.transplant i.transplant_type i.rt i.tbi i.cranialrt i.abdomrt i.rt_treat i.chemo i.anthracycline i.corticosteroids i.bleo_dactino_mito i.platinum_based i.alkylating_agents i.surgery_only surv_diabetesdeath, by(diabetes_death_ind) ///
+sample(, statistic(frequency percent) place(seplabels)) define(myiqr = p25 p75, delimiter("-")) continuous(agediag attained_age followuptime age_diabetes timetodiabetes surv_diabetesdeath, statistic(median myiqr)) ///
+nformat(%6.0f p25 p75 median) sformat("%s" myiqr) ///
+export(table_2.docx, replace) 
+*
+
+*Table 2 just diabetes flag
+dtable followuptime attained_age i.diagperiod agediag i.agegrp i.sex i.ethnic3 i.townsend_quin i.diaggrp i.relapse i.transplant i.transplant_type i.rt i.tbi i.cranialrt i.abdomrt i.rt_treat i.chemo i.anthracycline i.corti i.bleo_dactino_mito i.platinum_based i.alkylating_agents i.surgery_only age_diabetes timetodiabetes surv_diabetesdeath, by(hba1c_hes_dms) ///
+sample(, statistic(frequency percent) place(seplabels)) define(myiqr = p25 p75, delimiter("-")) continuous(agediag attained_age followuptime age_diabetes timetodiabetes surv_diabetesdeath, statistic(median myiqr)) ///
+nformat(%6.0f p25 p75 median) sformat("%s" myiqr) ///
+export(table_2a_paeds.docx, replace) 
+
+
+restore 
+
+preserve
+keep if agegrp2==2
+
+dtable followuptime attained_age i.diagperiod agediag i.agegrp i.sex i.ethnic3 i.townsend_quin i.diaggrp i.relapse i.transplant i.transplant_type i.rt i.tbi i.cranialrt i.abdomrt i.rt_treat i.chemo i.anthracycline i.corti i.bleo_dactino_mito i.platinum_based i.alkylating_agents i.surgery_only age_diabetes timetodiabetes surv_diabetesdeath, by(hba1c_hes_dms) ///
+sample(, statistic(frequency percent) place(seplabels)) define(myiqr = p25 p75, delimiter("-")) continuous(agediag attained_age followuptime age_diabetes timetodiabetes surv_diabetesdeath, statistic(median myiqr)) ///
+nformat(%6.0f p25 p75 median) sformat("%s" myiqr) ///
+export(table_2a_tya.docx, replace) 
+restore 
+*/
+
+foreach var of varlist agediag attained_age followuptime age_diabetes timetodiabetes {
+	/*bysort hba1c_hes_dms: sum `var' if agegrp2==1, d 
+	bysort hba1c_hes_dms: sum `var' if agegrp2==2, d */
+	bysort agegrp2: sum `var', d
+}
+
+* RUN ANALYSIS FOR PAEDIATRIC PATIENTS ONLY
+***************************
+/*preserve 
+keep if agegrp2==1
+*/
+count 
+
+foreach x in tbi transplant allogeneic2 corti {
+
+log using StandardisedCIFS`x'_tvcdeath.log, replace
+
+*Run diabetes flexible parametric survival models
+stset surv_diabetesdeath, failure(diabetes_death_ind==1) id(PatientId) 
+
+stcox `x', tvc(`x')
+
+*UNADJUSTED DIABETES MODEL - not time varying
+stpm3 i.`x', df(3) scale(lncumhazard) eform
+estimates store diabetes_unadjusted
+
+// MODEL 1 
+stpm3 i.`x' i.diaggrp i.stage diagyear @ns(agediag, df(3)), df(3) scale(lncumhazard) eform 
+estimates store diabetes
+
+*tvc
+stpm3 i.`x' i.diaggrp i.stage diagyear @ns(agediag, df(2)), df(3) scale(lncumhazard) eform
+
+*Run adjusted death model
+stset surv_diabetesdeath, failure(diabetes_death_ind==2) id(PatientId) 
+
+stcox `x', tvc(`x')
+
+stpm3 i.`x', df(2) scale(lncumhazard) eform
+estimates store death_unadjusted
+
+stpm3 i.`x' i.diaggrp i.stage diagyear @ns(agediag, df(2)), df(2) tvc(i.`x') dftvc(3) scale(lncumhazard) eform 
+estimates store death
+
+/// ------- ESTIMATING MARGINAL CAUSE SPECIFIC CIFS  ------- COMPETING RISKS
+
+/// RESTRICTING TO COVARIATE DISTRIBUTION OF THE EXPOSED ONLY 
+
+*Above standardisations have been performed using the empirical covariate distribution in the whole population (estimated average cause specific CIFs within the whole population, if everyone was treated compared to if no one was treated)
+
+*Assuming the model has controlled for confounding then this will give the average causal difference in the exposed. Curves may give higher or lower survival if those recieving treatment had other confounding factors which influence survival 
+
+*Times to predict cause specific CIF at - 40 years increasing in steps of 1 year 
+range tt 0 40 41
+
+//	MARGINAL SURVIVAL - COMPETING RISKS
+*Expectation of the overall CIF over standard covariate distribution 
+standsurv, crmodels(diabetes death) cif ci timevar(tt) atvar(F) verbose
+
+list F_diabetes* if tt==40, noobs abbrev(25)
+
+// Plotting marginal cause-specific CIFs for death and diabetes
+qui twoway (rarea F_diabetes_lci F_diabetes_uci tt, color(red%30)) (line F_diabetes tt, color(red)) ///
+(rarea F_death_lci F_death_uci tt, color(blue%30)) (line F_death tt, color(blue)) ///
+, legend(order(2 "Diabetes" 4 "Death") cols(1) ring(0) pos(11)) ///
+ylabel(0.0(0.2)0.6, angle(h) format(%3.2f)) ///
+xtitle("Time from diagnosis (years)") ytitle("Cause-specific CIF (%)") saving(crcif_cranial.gph, replace) 
+
+graph export crcif_`x'.pdf, replace
+
+/// Contrasts by exposure/treatment arm: effect of `x' on diabetes risk and death 
+*Covariate distribution we are averaging over is those who received `x' to account for within-group similarities in other treatment received  
+
+standsurv, crmodels(diabetes death) cif ci timevar(tt) verbose at1(`x' 1) at2(`x' 0) atvars(F_`x' F_no`x') contrast(difference) contrastvars(cif_diff)
+
+*list results 10, 15, 20, 30 years post-diagnosis for CIF of diabetes and death with ci's
+
+list F_`x'_diabetes* F_no`x'_diabetes* cif_diff_diabetes* if tt==10, noobs abbrev(25)
+
+list F_`x'_diabetes* F_no`x'_diabetes* cif_diff_diabetes* if tt==20, noobs abbrev(25)
+
+list F_`x'_diabetes* F_no`x'_diabetes* cif_diff_diabetes* if tt==30, noobs abbrev(25)
+
+list F_`x'_diabetes* F_no`x'_diabetes* cif_diff_diabetes* if tt==40, noobs abbrev(25)
+
+
+***PLOTTING STANDARDISED CAUSE SPECIFIC CIFS
+///Estimate for each individual in the study population their survival probability given the individuals covariate pattrn and then average the individual specific estimates to obtain the standardised survival probability
+
+*1a.) Plot diabetes standardised curves by `x'
+qui twoway (rarea F_`x'_diabetes_lci F_`x'_diabetes_uci tt, color(red%30)) ///
+(line F_`x'_diabetes tt, color(red)) ///
+(rarea F_no`x'_diabetes_lci F_no`x'_diabetes_uci tt, color(blue%30)) ///
+(line F_no`x'_diabetes tt, color(blue)) ///
+, legend(order(2 "Received `x'" 4 "Did not receive `x'") cols(1) ring(0) pos(11)) ///
+ylabel(0.0(0.2)0.6,angle(h) format(%3.2f)) ///
+xtitle("Time from diagnosis (years)") ytitle("Cause-specific CIF") ///
+title("Diabetes - `x'") saving(diabetes_`x'.gph, replace) 
+
+graph export diabetes_`x'.pdf, replace
+
+*2a.) Plot death standardised curves by `x'
+qui twoway (rarea F_`x'_death_lci F_`x'_death_uci tt, color(red%30)) ///
+(line F_`x'_death tt, color(red)) ///
+(rarea F_no`x'_death_lci F_no`x'_death_uci tt, color(blue%30)) ///
+(line F_no`x'_death tt, color(blue)) ///
+, legend(order(2 "Received `x'" 4 "Did not receive `x'") cols(1) ring(0) pos(11)) ///
+ylabel(0.0(0.2)0.6,angle(h) format(%3.2f)) ///
+xtitle("Time from diagnosis (years)") ytitle("Cause-specific CIF") ///
+title("Death - `x'") saving(death_`x'.gph, replace) 
+
+graph export death_`x'.pdf, replace
+
+****
+//plotting differences/contrasts in risk by treatment recieved
+*1b.) difference for diabetes
+qui twoway (rarea cif_diff_diabetes_lci cif_diff_diabetes_uci tt, color(black%15)) ///
+(line cif_diff_diabetes tt, color(black)) ///
+, legend(order(2 "Difference") cols(1) ring(0) pos(10)) ///
+ylabel(-0.3(0.1)0.1,angle(h) format(%3.2f)) ///
+xtitle("Time from diagnosis (years)") ytitle("Cause-specific CIF") ///
+title("Diabetes - `x'") saving(diabetes_difference`x'.gph, replace) 
+
+graph export diabetes_difference`x'.pdf, replace
+
+*2b.) difference for death 
+qui twoway (rarea cif_diff_death_lci cif_diff_death_uci tt, color(black%15)) ///
+(line cif_diff_death tt, color(black)) ///
+, legend(order(2 "Difference") cols(1) ring(0) pos(10)) ///
+ylabel(-0.5(0.2)0.1,angle(h) format(%3.2f)) ///
+xtitle("Time from diagnosis (years)") ytitle("Cause-specific CIF") ///
+title("Death - `x'") saving(death_difference`x'.gph, replace) 
+
+graph export death_difference`x'.pdf, replace
+
+graph combine diabetes_`x'.gph death_`x'.gph diabetes_difference`x'.gph death_difference`x'.gph, nocopies graphregion(color(white)) saving(combined_`x', replace)
+graph export total_comb_`x'.pdf, replace
+
+
+drop F_`x'_* F_no`x'* F_diabetes* F_death* cif_diff* tt
+
+log close 
+graphlog using StandardisedCIFs`x'_tvcdeath.log, fsize(10) replace 
+
+estimates clear
+}
+
+
+foreach x in cranialrt abdomrt autologous2 {
+log using StandardisedCIFS`x'.log, replace
+
+*Run diabetes flexible parametric survival models
+stset surv_diabetesdeath, failure(diabetes_death_ind==1) id(PatientId) 
+
+stcox `x', tvc(`x')
+
+*UNADJUSTED DIABETES MODEL - not time varying
+stpm3 i.`x', df(3) scale(lncumhazard) eform
+estimates store diabetes_unadjusted
+
+// MODEL 1 
+stpm3 i.`x' i.diaggrp i.stage diagyear @ns(agediag, df(3)), df(3) scale(lncumhazard) eform 
+estimates store diabetes
+
+*tvc
+stpm3 i.`x' i.diaggrp i.stage diagyear @ns(agediag, df(2)), df(3) scale(lncumhazard) eform
+
+*Run adjusted death model
+stset surv_diabetesdeath, failure(diabetes_death_ind==2) id(PatientId) 
+
+stcox `x', tvc(`x')
+
+stpm3 i.`x', df(2) scale(lncumhazard) eform
+estimates store death_unadjusted
+
+stpm3 i.`x' i.diaggrp i.stage diagyear @ns(agediag, df(2)), df(2) scale(lncumhazard) eform 
+estimates store death
+
+/// ------- ESTIMATING MARGINAL CAUSE SPECIFIC CIFS  ------- COMPETING RISKS
+
+/// RESTRICTING TO COVARIATE DISTRIBUTION OF THE EXPOSED ONLY 
+
+*Above standardisations have been performed using the empirical covariate distribution in the whole population (estimated average cause specific CIFs within the whole population, if everyone was treated compared to if no one was treated)
+
+*Assuming the model has controlled for confounding then this will give the average causal difference in the exposed. Curves may give higher or lower survival if those recieving treatment had other confounding factors which influence survival 
+
+*Times to predict cause specific CIF at - 40 years increasing in steps of 1 year 
+range tt 0 40 41
+
+//	MARGINAL SURVIVAL - COMPETING RISKS
+*Expectation of the overall CIF over standard covariate distribution 
+standsurv, crmodels(diabetes death) cif ci timevar(tt) atvar(F) verbose
+
+// Plotting marginal cause-specific CIFs for death and diabetes
+qui twoway (rarea F_diabetes_lci F_diabetes_uci tt, color(red%30)) (line F_diabetes tt, color(red)) ///
+(rarea F_death_lci F_death_uci tt, color(blue%30)) (line F_death tt, color(blue)) ///
+, legend(order(2 "Diabetes" 4 "Death") cols(1) ring(0) pos(11)) ///
+ylabel(0.0(0.2)0.6, angle(h) format(%3.2f)) ///
+xtitle("Time from diagnosis (years)") ytitle("Cause-specific CIF (%)") saving(crcif_cranial.gph, replace) 
+
+graph export crcif_`x'.pdf, replace
+
+/// Contrasts by exposure/treatment arm: effect of `x' on diabetes risk and death 
+*Covariate distribution we are averaging over is those who received `x' to account for within-group similarities in other treatment received  
+
+standsurv, crmodels(diabetes death) cif ci timevar(tt) verbose at1(`x' 1) at2(`x' 0) atvars(F_`x' F_no`x') contrast(difference) contrastvars(cif_diff)
+
+*list results 10, 15, 20, 30 years post-diagnosis for CIF of diabetes and death with ci's
+
+list F_`x'_diabetes* F_no`x'_diabetes* cif_diff_diabetes* if tt==10, noobs abbrev(25)
+
+list F_`x'_diabetes* F_no`x'_diabetes* cif_diff_diabetes* if tt==20, noobs abbrev(25)
+
+list F_`x'_diabetes* F_no`x'_diabetes* cif_diff_diabetes* if tt==30, noobs abbrev(25)
+
+list F_`x'_diabetes* F_no`x'_diabetes* cif_diff_diabetes* if tt==40, noobs abbrev(25)
+
+
+***PLOTTING STANDARDISED CAUSE SPECIFIC CIFS
+///Estimate for each individual in the study population their survival probability given the individuals covariate pattrn and then average the individual specific estimates to obtain the standardised survival probability
+
+*1a.) Plot diabetes standardised curves by `x'
+qui twoway (rarea F_`x'_diabetes_lci F_`x'_diabetes_uci tt, color(red%30)) ///
+(line F_`x'_diabetes tt, color(red)) ///
+(rarea F_no`x'_diabetes_lci F_no`x'_diabetes_uci tt, color(blue%30)) ///
+(line F_no`x'_diabetes tt, color(blue)) ///
+, legend(order(2 "Received `x'" 4 "Did not receive `x'") cols(1) ring(0) pos(11)) ///
+ylabel(0.0(0.2)0.6,angle(h) format(%3.2f)) ///
+xtitle("Time from diagnosis (years)") ytitle("Cause-specific CIF") ///
+title("Diabetes - `x'") saving(diabetes_`x'.gph, replace) 
+
+graph export diabetes_`x'.pdf, replace
+
+*2a.) Plot death standardised curves by `x'
+qui twoway (rarea F_`x'_death_lci F_`x'_death_uci tt, color(red%30)) ///
+(line F_`x'_death tt, color(red)) ///
+(rarea F_no`x'_death_lci F_no`x'_death_uci tt, color(blue%30)) ///
+(line F_no`x'_death tt, color(blue)) ///
+, legend(order(2 "Received `x'" 4 "Did not receive `x'") cols(1) ring(0) pos(11)) ///
+ylabel(0.0(0.2)0.6,angle(h) format(%3.2f)) ///
+xtitle("Time from diagnosis (years)") ytitle("Cause-specific CIF") ///
+title("Death - `x'") saving(death_`x'.gph, replace) 
+
+graph export death_`x'.pdf, replace
+
+****
+//plotting differences/contrasts in risk by treatment recieved
+*1b.) difference for diabetes
+qui twoway (rarea cif_diff_diabetes_lci cif_diff_diabetes_uci tt, color(black%15)) ///
+(line cif_diff_diabetes tt, color(black)) ///
+, legend(order(2 "Difference") cols(1) ring(0) pos(10)) ///
+ylabel(-0.5(0.2)0.1,angle(h) format(%3.2f)) ///
+xtitle("Time from diagnosis (years)") ytitle("Cause-specific CIF") ///
+title("Diabetes - `x'") saving(diabetes_difference`x'.gph, replace) 
+
+graph export diabetes_difference`x'.pdf, replace
+
+*2b.) difference for death 
+qui twoway (rarea cif_diff_death_lci cif_diff_death_uci tt, color(black%15)) ///
+(line cif_diff_death tt, color(black)) ///
+, legend(order(2 "Difference") cols(1) ring(0) pos(10)) ///
+ylabel(-0.5(0.2)0.1,angle(h) format(%3.2f)) ///
+xtitle("Time from diagnosis (years)") ytitle("Cause-specific CIF") ///
+title("Death - `x'") saving(death_difference`x'.gph, replace) 
+
+graph export death_difference`x'.pdf, replace
+
+graph combine diabetes_`x'.gph death_`x'.gph diabetes_difference`x'.gph death_difference`x'.gph, nocopies graphregion(color(white)) saving(combined_`x', replace)
+graph export total_comb_`x'.pdf, replace
+
+
+drop F_`x'_* F_no`x'* F_diabetes* F_death* cif_diff* tt
+
+log close 
+graphlog using StandardisedCIFs`x'.log, fsize(10) replace 
+
+estimates clear
+}	
+restore 
+
+*/
+
+cd "N:\CANREG\Kirsten\PhD\May 2024\CIFS\TYA"
+
+preserve 
+keep if agegrp2==2
+
+count 
+
+foreach x in tbi transplant allogeneic2 corti {
+
+log using StandardisedCIFS`x'_tvcdeath.log, replace
+
+*Run diabetes flexible parametric survival models
+stset surv_diabetesdeath, failure(diabetes_death_ind==1) id(PatientId) 
+
+stcox `x', tvc(`x')
+
+*UNADJUSTED DIABETES MODEL - not time varying
+stpm3 i.`x', df(3) scale(lncumhazard) eform
+estimates store diabetes_unadjusted
+
+// MODEL 1 
+stpm3 i.`x' i.diaggrp i.stage diagyear @ns(agediag, df(3)), df(3) scale(lncumhazard) eform 
+estimates store diabetes
+
+*tvc
+stpm3 i.`x' i.diaggrp i.stage diagyear @ns(agediag, df(2)), df(3) scale(lncumhazard) eform
+
+*Run adjusted death model
+stset surv_diabetesdeath, failure(diabetes_death_ind==2) id(PatientId) 
+
+stcox `x', tvc(`x')
+
+stpm3 i.`x', df(2) scale(lncumhazard) eform
+estimates store death_unadjusted
+
+stpm3 i.`x' i.diaggrp i.stage diagyear @ns(agediag, df(2)), df(2) scale(lncumhazard) eform 
+estimates store death
+
+/// ------- ESTIMATING MARGINAL CAUSE SPECIFIC CIFS  ------- COMPETING RISKS
+
+/// RESTRICTING TO COVARIATE DISTRIBUTION OF THE EXPOSED ONLY 
+
+*Above standardisations have been performed using the empirical covariate distribution in the whole population (estimated average cause specific CIFs within the whole population, if everyone was treated compared to if no one was treated)
+
+*Assuming the model has controlled for confounding then this will give the average causal difference in the exposed. Curves may give higher or lower survival if those recieving treatment had other confounding factors which influence survival 
+
+*Times to predict cause specific CIF at - 40 years increasing in steps of 1 year 
+range tt 0 30 31
+
+//	MARGINAL SURVIVAL - COMPETING RISKS
+*Expectation of the overall CIF over standard covariate distribution 
+standsurv, crmodels(diabetes death) cif ci timevar(tt) atvar(F) verbose
+
+list F_diabetes* if tt==30, noobs abbrev(25)
+
+// Plotting marginal cause-specific CIFs for death and diabetes
+qui twoway (rarea F_diabetes_lci F_diabetes_uci tt, color(red%30)) (line F_diabetes tt, color(red)) ///
+(rarea F_death_lci F_death_uci tt, color(blue%30)) (line F_death tt, color(blue)) ///
+, legend(order(2 "Diabetes" 4 "Death") cols(1) ring(0) pos(11)) ///
+ylabel(0.0(0.2)0.6, angle(h) format(%3.2f)) ///
+xtitle("Time from diagnosis (years)") ytitle("Cause-specific CIF (%)") saving(crcif_cranial.gph, replace) 
+
+graph export crcif_`x'.pdf, replace
+
+/// Contrasts by exposure/treatment arm: effect of `x' on diabetes risk and death 
+*Covariate distribution we are averaging over is those who received `x' to account for within-group similarities in other treatment received  
+
+standsurv, crmodels(diabetes death) cif ci timevar(tt) verbose at1(`x' 1) at2(`x' 0) atvars(F_`x' F_no`x') contrast(difference) contrastvars(cif_diff)
+
+*list results 10, 15, 20, 30 years post-diagnosis for CIF of diabetes and death with ci's
+
+list F_`x'_diabetes* F_no`x'_diabetes* cif_diff_diabetes* if tt==10, noobs abbrev(25)
+
+list F_`x'_diabetes* F_no`x'_diabetes* cif_diff_diabetes* if tt==20, noobs abbrev(25)
+
+list F_`x'_diabetes* F_no`x'_diabetes* cif_diff_diabetes* if tt==30, noobs abbrev(25)
+
+
+***PLOTTING STANDARDISED CAUSE SPECIFIC CIFS
+///Estimate for each individual in the study population their survival probability given the individuals covariate pattrn and then average the individual specific estimates to obtain the standardised survival probability
+
+*1a.) Plot diabetes standardised curves by `x'
+qui twoway (rarea F_`x'_diabetes_lci F_`x'_diabetes_uci tt, color(red%30)) ///
+(line F_`x'_diabetes tt, color(red)) ///
+(rarea F_no`x'_diabetes_lci F_no`x'_diabetes_uci tt, color(blue%30)) ///
+(line F_no`x'_diabetes tt, color(blue)) ///
+, legend(order(2 "Received `x'" 4 "Did not receive `x'") cols(1) ring(0) pos(11)) ///
+ylabel(0.0(0.2)0.6,angle(h) format(%3.2f)) ///
+xtitle("Time from diagnosis (years)") ytitle("Cause-specific CIF") ///
+title("Diabetes - `x'") saving(diabetes_`x'.gph, replace) 
+
+graph export diabetes_`x'.pdf, replace
+
+*2a.) Plot death standardised curves by `x'
+qui twoway (rarea F_`x'_death_lci F_`x'_death_uci tt, color(red%30)) ///
+(line F_`x'_death tt, color(red)) ///
+(rarea F_no`x'_death_lci F_no`x'_death_uci tt, color(blue%30)) ///
+(line F_no`x'_death tt, color(blue)) ///
+, legend(order(2 "Received `x'" 4 "Did not receive `x'") cols(1) ring(0) pos(11)) ///
+ylabel(0.0(0.2)0.6,angle(h) format(%3.2f)) ///
+xtitle("Time from diagnosis (years)") ytitle("Cause-specific CIF") ///
+title("Death - `x'") saving(death_`x'.gph, replace) 
+
+graph export death_`x'.pdf, replace
+
+****
+//plotting differences/contrasts in risk by treatment recieved
+*1b.) difference for diabetes
+qui twoway (rarea cif_diff_diabetes_lci cif_diff_diabetes_uci tt, color(black%15)) ///
+(line cif_diff_diabetes tt, color(black)) ///
+, legend(order(2 "Difference") cols(1) ring(0) pos(10)) ///
+ylabel(-0.3(0.1)0.1,angle(h) format(%3.2f)) ///
+xtitle("Time from diagnosis (years)") ytitle("Cause-specific CIF") ///
+title("Diabetes - `x'") saving(diabetes_difference`x'.gph, replace) 
+
+graph export diabetes_difference`x'.pdf, replace
+
+*2b.) difference for death 
+qui twoway (rarea cif_diff_death_lci cif_diff_death_uci tt, color(black%15)) ///
+(line cif_diff_death tt, color(black)) ///
+, legend(order(2 "Difference") cols(1) ring(0) pos(10)) ///
+ylabel(-0.5(0.2)0.1,angle(h) format(%3.2f)) ///
+xtitle("Time from diagnosis (years)") ytitle("Cause-specific CIF") ///
+title("Death - `x'") saving(death_difference`x'.gph, replace) 
+
+graph export death_difference`x'.pdf, replace
+
+graph combine diabetes_`x'.gph death_`x'.gph diabetes_difference`x'.gph death_difference`x'.gph, nocopies graphregion(color(white)) saving(combined_`x', replace)
+graph export total_comb_`x'.pdf, replace
+
+
+drop F_`x'_* F_no`x'* F_diabetes* F_death* cif_diff* tt
+
+log close 
+graphlog using StandardisedCIFs`x'_tvcdeath.log, fsize(10) replace 
+
+estimates clear
+}
+
+
+foreach x in cranialrt abdomrt autologous2 {
+log using StandardisedCIFS`x'.log, replace
+
+*Run diabetes flexible parametric survival models
+stset surv_diabetesdeath, failure(diabetes_death_ind==1) id(PatientId) 
+
+stcox `x', tvc(`x')
+
+*UNADJUSTED DIABETES MODEL - not time varying
+stpm3 i.`x', df(3) scale(lncumhazard) eform
+estimates store diabetes_unadjusted
+
+// MODEL 1 
+stpm3 i.`x' i.diaggrp i.stage diagyear @ns(agediag, df(3)), df(3) scale(lncumhazard) eform 
+estimates store diabetes
+
+*tvc
+stpm3 i.`x' i.diaggrp i.stage diagyear @ns(agediag, df(2)), df(3) scale(lncumhazard) eform
+
+*Run adjusted death model
+stset surv_diabetesdeath, failure(diabetes_death_ind==2) id(PatientId) 
+
+stcox `x', tvc(`x')
+
+stpm3 i.`x', df(2) scale(lncumhazard) eform
+estimates store death_unadjusted
+
+stpm3 i.`x' i.diaggrp i.stage diagyear @ns(agediag, df(2)), df(2) scale(lncumhazard) eform 
+estimates store death
+
+/// ------- ESTIMATING MARGINAL CAUSE SPECIFIC CIFS  ------- COMPETING RISKS
+
+/// RESTRICTING TO COVARIATE DISTRIBUTION OF THE EXPOSED ONLY 
+
+*Above standardisations have been performed using the empirical covariate distribution in the whole population (estimated average cause specific CIFs within the whole population, if everyone was treated compared to if no one was treated)
+
+*Assuming the model has controlled for confounding then this will give the average causal difference in the exposed. Curves may give higher or lower survival if those recieving treatment had other confounding factors which influence survival 
+
+*Times to predict cause specific CIF at - 40 years increasing in steps of 1 year 
+range tt 0 30 31
+
+//	MARGINAL SURVIVAL - COMPETING RISKS
+*Expectation of the overall CIF over standard covariate distribution 
+standsurv, crmodels(diabetes death) cif ci timevar(tt) atvar(F) verbose
+
+// Plotting marginal cause-specific CIFs for death and diabetes
+qui twoway (rarea F_diabetes_lci F_diabetes_uci tt, color(red%30)) (line F_diabetes tt, color(red)) ///
+(rarea F_death_lci F_death_uci tt, color(blue%30)) (line F_death tt, color(blue)) ///
+, legend(order(2 "Diabetes" 4 "Death") cols(1) ring(0) pos(11)) ///
+ylabel(0.0(0.2)0.6, angle(h) format(%3.2f)) ///
+xtitle("Time from diagnosis (years)") ytitle("Cause-specific CIF (%)") saving(crcif_cranial.gph, replace) 
+
+graph export crcif_`x'.pdf, replace
+
+/// Contrasts by exposure/treatment arm: effect of `x' on diabetes risk and death 
+*Covariate distribution we are averaging over is those who received `x' to account for within-group similarities in other treatment received  
+
+standsurv, crmodels(diabetes death) cif ci timevar(tt) verbose at1(`x' 1) at2(`x' 0) atvars(F_`x' F_no`x') contrast(difference) contrastvars(cif_diff)
+
+*list results 10, 15, 20, 30 years post-diagnosis for CIF of diabetes and death with ci's
+
+list F_`x'_diabetes* F_no`x'_diabetes* cif_diff_diabetes* if tt==10, noobs abbrev(25)
+
+list F_`x'_diabetes* F_no`x'_diabetes* cif_diff_diabetes* if tt==20, noobs abbrev(25)
+
+list F_`x'_diabetes* F_no`x'_diabetes* cif_diff_diabetes* if tt==30, noobs abbrev(25)
+
+
+***PLOTTING STANDARDISED CAUSE SPECIFIC CIFS
+///Estimate for each individual in the study population their survival probability given the individuals covariate pattrn and then average the individual specific estimates to obtain the standardised survival probability
+
+*1a.) Plot diabetes standardised curves by `x'
+qui twoway (rarea F_`x'_diabetes_lci F_`x'_diabetes_uci tt, color(red%30)) ///
+(line F_`x'_diabetes tt, color(red)) ///
+(rarea F_no`x'_diabetes_lci F_no`x'_diabetes_uci tt, color(blue%30)) ///
+(line F_no`x'_diabetes tt, color(blue)) ///
+, legend(order(2 "Received `x'" 4 "Did not receive `x'") cols(1) ring(0) pos(11)) ///
+ylabel(0.0(0.2)0.6,angle(h) format(%3.2f)) ///
+xtitle("Time from diagnosis (years)") ytitle("Cause-specific CIF") ///
+title("Diabetes - `x'") saving(diabetes_`x'.gph, replace) 
+
+graph export diabetes_`x'.pdf, replace
+
+*2a.) Plot death standardised curves by `x'
+qui twoway (rarea F_`x'_death_lci F_`x'_death_uci tt, color(red%30)) ///
+(line F_`x'_death tt, color(red)) ///
+(rarea F_no`x'_death_lci F_no`x'_death_uci tt, color(blue%30)) ///
+(line F_no`x'_death tt, color(blue)) ///
+, legend(order(2 "Received `x'" 4 "Did not receive `x'") cols(1) ring(0) pos(11)) ///
+ylabel(0.0(0.2)0.6,angle(h) format(%3.2f)) ///
+xtitle("Time from diagnosis (years)") ytitle("Cause-specific CIF") ///
+title("Death - `x'") saving(death_`x'.gph, replace) 
+
+graph export death_`x'.pdf, replace
+
+****
+//plotting differences/contrasts in risk by treatment recieved
+*1b.) difference for diabetes
+qui twoway (rarea cif_diff_diabetes_lci cif_diff_diabetes_uci tt, color(black%15)) ///
+(line cif_diff_diabetes tt, color(black)) ///
+, legend(order(2 "Difference") cols(1) ring(0) pos(10)) ///
+ylabel(-0.5(0.2)0.1,angle(h) format(%3.2f)) ///
+xtitle("Time from diagnosis (years)") ytitle("Cause-specific CIF") ///
+title("Diabetes - `x'") saving(diabetes_difference`x'.gph, replace) 
+
+graph export diabetes_difference`x'.pdf, replace
+
+*2b.) difference for death 
+qui twoway (rarea cif_diff_death_lci cif_diff_death_uci tt, color(black%15)) ///
+(line cif_diff_death tt, color(black)) ///
+, legend(order(2 "Difference") cols(1) ring(0) pos(10)) ///
+ylabel(-0.5(0.2)0.1,angle(h) format(%3.2f)) ///
+xtitle("Time from diagnosis (years)") ytitle("Cause-specific CIF") ///
+title("Death - `x'") saving(death_difference`x'.gph, replace) 
+
+graph export death_difference`x'.pdf, replace
+
+graph combine diabetes_`x'.gph death_`x'.gph diabetes_difference`x'.gph death_difference`x'.gph, nocopies graphregion(color(white)) saving(combined_`x', replace)
+graph export total_comb_`x'.pdf, replace
+
+
+drop F_`x'_* F_no`x'* F_diabetes* F_death* cif_diff* tt
+
+log close 
+graphlog using StandardisedCIFs`x'.log, fsize(10) replace 
+
+estimates clear
+}	
+restore 
+
+
+*************************************************************************************
+/// Variation in cause-specific CIF and contrasts by treatment arm and diagnostic group
+
+*standsurv at time since diagnosis 
+*Standardised survival by cranialrt for leukaemias vs CNS
+log using "Transplant_sensitivity_adjusted.smcl", replace
+keep if transplant==1
+
+stset surv_diabetesdeath, failure(diabetes_death_ind==1) id(PatientId) 
+
+// MODEL 1 
+stpm3 i.transplant_type i.conditioning i.diaggrp i.stage diagyear @ns(agediag, df(3)), df(3) scale(lncumhazard) eform
+estimates store diabetes
+
+*Run adjusted death model
+stset surv_diabetesdeath, failure(diabetes_death_ind==2) id(PatientId) 
+
+stpm3 i.transplant_type i.conditioning i.diaggrp i.stage diagyear, scale(lncumhazard) df(1) eform 
+estimates store death
+
+range tt 0 40 41
+
+//	MARGINAL SURVIVAL - COMPETING RISKS
+*Expectation of the overall CIF over standard covariate distribution 
+standsurv, crmodels(diabetes death) cif ci timevar(tt) atvar(F) verbose
+
+/// Contrasts by exposure/treatment arm: effect of `x' on diabetes risk and death 
+*Covariate distribution we are averaging over is those who received `x' to account for within-group similarities in other treatment received  
+
+standsurv, crmodels(diabetes death) cif ci timevar(tt) verbose at1(transplant_type 0) at2(transplant_type 1) atvars(F_auto F_allo) contrast(difference) contrastvars(cif_diff)
+
+*list results 10, 15, 20, 30 years post-diagnosis for CIF of diabetes and death with ci's
+list F_auto_diabetes* F_allo_diabetes* cif_diff_diabetes* if tt==5, noobs abbrev(25)
+
+list F_auto_diabetes* F_allo_diabetes* cif_diff_diabetes* if tt==10, noobs abbrev(25)
+
+list F_auto_diabetes* F_allo_diabetes* cif_diff_diabetes* if tt==15, noobs abbrev(25)
+
+list F_auto_diabetes* F_allo_diabetes* cif_diff_diabetes* if tt==20, noobs abbrev(25)
+
+list F_auto_diabetes* F_allo_diabetes* cif_diff_diabetes* if tt==25, noobs abbrev(25)
+
+list F_auto_diabetes* F_allo_diabetes* cif_diff_diabetes* if tt==30, noobs abbrev(25)
+
+list F_auto_diabetes* F_allo_diabetes* cif_diff_diabetes* if tt==40, noobs abbrev(25)
+
+*Diabetes by diagnostic group
+qui twoway (rarea F_auto_diabetes_lci F_auto_diabetes_uci tt, color(red%30)) ///
+(line F_auto_diabetes tt, color(red)) ///
+(rarea F_allo_diabetes_lci F_allo_diabetes_uci tt, color(blue%30)) ///
+(line F_allo_diabetes tt, color(blue)) ///
+, legend(order(2 "Autologous" 4 "Allogeneic") cols(1) ring(0) pos(11)) ///
+ylabel(0.0(0.1)0.4,angle(h) format(%3.2f)) ///
+xtitle("Time from diagnosis (years)") ytitle("cause-specific CIF") ///
+title("Transplant type") saving(diabetes_transplant.gph, replace)
+
+*Death by diagnostic group
+qui twoway (rarea F_auto_death_lci F_auto_death_uci tt, color(red%30)) ///
+(line F_auto_death tt, color(red)) ///
+(rarea F_allo_death_lci F_allo_death_uci tt, color(blue%30)) ///
+(line F_allo_death tt, color(blue)) ///
+, legend(order(1 "Autologous" 2 "Allogeneic") cols(1) ring(0) pos(11)) ///
+ylabel(0.0(0.1)0.4,angle(h) format(%3.2f)) ///
+xtitle("Time from diagnosis (years)") ytitle("cause-specific CIF") ///
+title("Transplant type") saving(death_transplanttype.gph, replace)
+
+graph combine diabetes_transplanttype.gph death_transplanttype.gph, nocopies graphregion(color(white)) 
+graph export Transplant_Type.pdf, replace
+
+******************** Don't adjust for conditioning receieved
+stset surv_diabetesdeath, failure(diabetes_death_ind==1) id(PatientId) 
+
+// MODEL 1 
+stpm3 i.transplant_type i.diaggrp i.stage diagyear @ns(agediag, df(3)), df(3) scale(lncumhazard) eform
+estimates store diabetes
+
+*Run adjusted death model
+stset surv_diabetesdeath, failure(diabetes_death_ind==2) id(PatientId) 
+
+stpm3 i.transplant_type i.diaggrp i.stage diagyear, scale(lncumhazard) df(1) eform 
+estimates store death
+
+range tt 0 40 41
+
+//	MARGINAL SURVIVAL - COMPETING RISKS
+*Expectation of the overall CIF over standard covariate distribution 
+standsurv, crmodels(diabetes death) cif ci timevar(tt) atvar(F) verbose
+
+/// Contrasts by exposure/treatment arm: effect of `x' on diabetes risk and death 
+*Covariate distribution we are averaging over is those who received `x' to account for within-group similarities in other treatment received  
+
+standsurv, crmodels(diabetes death) cif ci timevar(tt) verbose at1(transplant_type 0) at2(transplant_type 1) atvars(F_auto F_allo) contrast(difference) contrastvars(cif_diff)
+
+*list results 10, 15, 20, 30 years post-diagnosis for CIF of diabetes and death with ci's
+list F_auto_diabetes* F_allo_diabetes* cif_diff_diabetes* if tt==5, noobs abbrev(25)
+
+list F_auto_diabetes* F_allo_diabetes* cif_diff_diabetes* if tt==10, noobs abbrev(25)
+
+list F_auto_diabetes* F_allo_diabetes* cif_diff_diabetes* if tt==15, noobs abbrev(25)
+
+list F_auto_diabetes* F_allo_diabetes* cif_diff_diabetes* if tt==20, noobs abbrev(25)
+
+list F_auto_diabetes* F_allo_diabetes* cif_diff_diabetes* if tt==25, noobs abbrev(25)
+
+list F_auto_diabetes* F_allo_diabetes* cif_diff_diabetes* if tt==30, noobs abbrev(25)
+
+list F_auto_diabetes* F_allo_diabetes* cif_diff_diabetes* if tt==40, noobs abbrev(25)
+
+*Diabetes by diagnostic group
+qui twoway (rarea F_auto_diabetes_lci F_auto_diabetes_uci tt, color(red%30)) ///
+(line F_auto_diabetes tt, color(red)) ///
+(rarea F_allo_diabetes_lci F_allo_diabetes_uci tt, color(blue%30)) ///
+(line F_allo_diabetes tt, color(blue)) ///
+, legend(order(2 "Autologous" 4 "Allogeneic") cols(1) ring(0) pos(11)) ///
+ylabel(0.0(0.1)0.4,angle(h) format(%3.2f)) ///
+xtitle("Time from diagnosis (years)") ytitle("cause-specific CIF") ///
+title("Transplant type") saving(diabetes_transplant_unadj.gph, replace)
+
+*Death by diagnostic group
+qui twoway (rarea F_auto_death_lci F_auto_death_uci tt, color(red%30)) ///
+(line F_auto_death tt, color(red)) ///
+(rarea F_allo_death_lci F_allo_death_uci tt, color(blue%30)) ///
+(line F_allo_death tt, color(blue)) ///
+, legend(order(2 "Autologous" 4 "Allogeneic") cols(1) ring(0) pos(11)) ///
+ylabel(0.0(0.1)0.4,angle(h) format(%3.2f)) ///
+xtitle("Time from diagnosis (years)") ytitle("cause-specific CIF") ///
+title("Transplant type") saving(death_transplanttype_unadj.gph, replace)
+
+graph combine diabetes_transplanttype.gph death_transplanttype.gph, nocopies graphregion(color(white)) 
+graph export Transplant_Type_unadj.pdf, replace
+
+log close 
+
+**********************************************************************************************
+foreach x in tbi allogeneic2 corti {
+
+log using StandardisedCIFS`x'_covariate.log, replace
+
+stset surv_diabetesdeath, failure(diabetes_death_ind==1) id(PatientId) 
+
+/// Run FPM model with main effect interaction between `x' and diagnostic group
+stpm3 i.`x'##i.diaggrp i.stage @ns(diagyear, df(3)) @ns(agediag, df(3)), df(4) scale(lncumhazard) eform
+	
+estimates store diabetes
+
+*death model with main effect interaction between `x' and diagnostic group
+stset surv_diabetesdeath, failure(diabetes_death_ind==2) id(PatientId) 
+
+	stpm3 i.`x'##i.diaggrp i.stage i.HES_ethgrp @ns(diagyear, df(3)) @ns(agediag, df(3)), scale(lncumhazard) df(4) eform 
+	estimates store death 
+
+*predict the cif of diabetes for leukaemia and cns patients with and without `x'
+standsurv, crmodels(diabetes death) cif timevar(tt) ci contrast(difference) ///
+at1(`x' 1 diaggrp 1) ///
+at2(`x' 1 diaggrp 3) ///
+at3(`x' 0 diaggrp 1) ///
+at4(`x' 0 diaggrp 3) ///
+atvars(leuk_`x' cns_`x' leuk_no`x' cns_no`x') 
+
+list leuk_`x'_diabetes* cns_`x'_diabetes* leuk_no`x'_diabetes* cns_no`x'_diabetes* if tt==10, noobs abbrev(25)
+
+list leuk_`x'_diabetes* cns_`x'_diabetes* leuk_no`x'_diabetes* cns_no`x'_diabetes* if tt==15, noobs abbrev(25)
+
+list leuk_`x'_diabetes* cns_`x'_diabetes* leuk_no`x'_diabetes* cns_no`x'_diabetes* if tt==20, noobs abbrev(25)
+
+list leuk_`x'_diabetes* cns_`x'_diabetes* leuk_no`x'_diabetes* cns_no`x'_diabetes* if tt==25, noobs abbrev(25)
+
+list leuk_`x'_diabetes* cns_`x'_diabetes* leuk_no`x'_diabetes* cns_no`x'_diabetes* if tt==30, noobs abbrev(25)
+
+*Diabetes by diagnostic group
+qui twoway (line leuk_`x'_diabetes tt, color(red)) ///
+(line cns_`x'_diabetes tt, color(blue)) ///
+(line leuk_no`x'_diabetes tt, color(midgreen)) ///
+(line cns_no`x'_diabetes tt, color(magenta)) ///
+, legend(order(1 "Leukaemia `x'" 2 "CNS `x'" 3 "Leukaemia no `x'" 4 "CNS no `x'") cols(1) ring(0) pos(11)) ///
+ylabel(0.0(0.1)0.4,angle(h) format(%3.2f)) ///
+xtitle("Time from diagnosis (years)") ytitle("cause-specific CIF") ///
+title("Diabetes `x' leuk/CNS") saving(diabetes_`x'_diag.gph, replace)
+
+*graph export diabetes_`x'_diag.pdf, replace
+
+	*Death by diagnostic group 
+qui twoway (line leuk_`x'_death tt, color(red)) ///
+(line cns_`x'_death tt, color(blue)) ///
+(line leuk_no`x'_death tt, color(midgreen)) ///
+(line cns_no`x'_death tt, color(magenta)) ///
+, legend(order(1 "Leukaemia `x'" 2 "CNS `x'" 3 "Leukaemia no `x'" 4 "CNS no `x'") cols(1) ring(0) pos(11)) ///
+ylabel(0.0(0.1)0.4,angle(h) format(%3.2f)) ///
+xtitle("Time from diagnosis (years)") ///
+ytitle("cause-specific CIF") ///
+title("Death `x' leuk/CNS") saving(death_`x'_diag.gph, replace)
+
+*graph export death_`x'_diag.pdf, replace 
+
+graph combine diabetes_`x'_diag.gph death_`x'_diag.gph, nocopies graphregion(color(white)) 
+graph export Interactions_`x'.pdf, replace
+
+drop leuk_`x'_diabetes* cns_`x'_diabetes* leuk_no`x'_diabetes* cns_no`x'_diabetes* leuk_`x'_death* cns_`x'_death* leuk_no`x'_death* cns_no`x'_death* _contrast* tt
+estimates clear 
+
+log close 
+*graphlog using StandardisedCIFs`x'.log, fsize(10) replace 
+
+	}
+	
